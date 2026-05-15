@@ -41,7 +41,7 @@ ns_get() {
 
 # ── CGM entries ──────────────────────────────────────────────────────────────
 if [[ "${DOWNLOAD_ENTRIES:-1}" == "1" ]]; then
-    OUT="$OUTPUT_DIR/entries_${YESTERDAY}.csv"
+    OUT="$OUTPUT_DIR/${YESTERDAY}_entries.csv"
     echo "Downloading CGM entries for $YESTERDAY..."
 
     ns_get "/api/v1/entries.json?find[dateString][\$gte]=${DAY_START}&find[dateString][\$lte]=${DAY_END}&count=1440" \
@@ -64,7 +64,7 @@ fi
 
 # ── Treatments ───────────────────────────────────────────────────────────────
 if [[ "${DOWNLOAD_TREATMENTS:-1}" == "1" ]]; then
-    OUT="$OUTPUT_DIR/treatments_${YESTERDAY}.csv"
+    OUT="$OUTPUT_DIR/${YESTERDAY}_treatments.csv"
     echo "Downloading treatments for $YESTERDAY..."
 
     ns_get "/api/v1/treatments.json?find[created_at][\$gte]=${DAY_START}&find[created_at][\$lte]=${DAY_END}&count=1000" \
@@ -91,12 +91,12 @@ fi
 
 # ── Profile ───────────────────────────────────────────────────────────────────
 if [[ "${DOWNLOAD_PROFILE:-1}" == "1" ]]; then
-    OUT="$OUTPUT_DIR/profile_${YESTERDAY}.json"
+    OUT="$OUTPUT_DIR/${YESTERDAY}_profile.json"
     echo "Downloading profile..."
 
     # Profile is not time-series; save raw JSON (it rarely changes day-to-day).
     # Only write if it changed since yesterday's copy.
-    PREV="$OUTPUT_DIR/profile_$(date -v-2d +%Y-%m-%d).json"
+    PREV="$OUTPUT_DIR/$(date -v-2d +%Y-%m-%d)_profile.json"
     ns_get "/api/v1/profile.json" > "${OUT}.tmp"
 
     if [[ -f "$PREV" ]] && diff -q "$PREV" "${OUT}.tmp" >/dev/null 2>&1; then
