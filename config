@@ -1,0 +1,15 @@
+# Nightscout Downloader — edit these values before running
+
+NIGHTSCOUT_URL="https://YOUR-SITE.example.com"   # no trailing slash
+API_SECRET="your-api-secret-here"
+
+OUTPUT_DIR="$HOME/nightscout-exports"
+
+# What to download: set to 1 to enable, 0 to disable
+DOWNLOAD_ENTRIES=1      # CGM readings (glucose values)
+DOWNLOAD_TREATMENTS=1   # Insulin, carbs, notes
+DOWNLOAD_PROFILE=1      # Basal rates, ISF, carb ratios
+
+# Time launchd will run the script each day (24h, local time)
+RUN_HOUR=6
+RUN_MINUTE=0
