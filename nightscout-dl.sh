@@ -2,7 +2,26 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG="${1:-$SCRIPT_DIR/config}"
+
+usage() {
+    echo "Usage: $(basename "$0") [-c config] [-d YYYY-MM-DD]" >&2
+    echo "  -c  path to config file (overrides \$NIGHTSCOUT_CONFIG env var)" >&2
+    echo "  -d  date to download (default: yesterday)" >&2
+    exit 1
+}
+
+TARGET_DATE=""
+while getopts ":c:d:h" opt; do
+    case $opt in
+        c) NIGHTSCOUT_CONFIG="$OPTARG" ;;
+        d) TARGET_DATE="$OPTARG" ;;
+        h) usage ;;
+        :) echo "ERROR: -$OPTARG requires an argument" >&2; usage ;;
+        \?) echo "ERROR: unknown option -$OPTARG" >&2; usage ;;
+    esac
+done
+
+CONFIG="${NIGHTSCOUT_CONFIG:-$SCRIPT_DIR/config}"
 
 # ── Load config ──────────────────────────────────────────────────────────────
 if [[ ! -f "$CONFIG" ]]; then
@@ -12,19 +31,33 @@ fi
 source "$CONFIG"
 
 # ── Validate config ──────────────────────────────────────────────────────────
-if [[ "$NIGHTSCOUT_URL" == *"YOUR-SITE"* ]] || [[ "$API_SECRET" == "your-api-secret-here" ]]; then
-    echo "ERROR: edit $CONFIG and set NIGHTSCOUT_URL and API_SECRET before running." >&2
-    exit 1
+if [[ "$NIGHTSCOUT_URL" == *"YOUR-SITE"* ]]; then
+    echo "ERROR: set NIGHTSCOUT_URL in $CONFIG" >&2; exit 1
+fi
+if [[ -z "${NS_TOKEN:-}" ]] && [[ -z "${API_SECRET:-}" ]]; then
+    echo "ERROR: set NS_TOKEN or API_SECRET in $CONFIG" >&2; exit 1
 fi
 
 command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required. Install with: brew install jq" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "ERROR: curl is required." >&2; exit 1; }
 
-# ── Auth header (SHA1 of API secret) ─────────────────────────────────────────
-API_SECRET_HASH=$(echo -n "$API_SECRET" | shasum -a 1 | awk '{print $1}')
+# ── Auth ─────────────────────────────────────────────────────────────────────
+if [[ -n "${NS_TOKEN:-}" ]]; then
+    AUTH_PARAM="token=${NS_TOKEN}"
+    AUTH_HEADER=""
+else
+    AUTH_PARAM=""
+    AUTH_HEADER="api-secret: $(echo -n "$API_SECRET" | shasum -a 1 | awk '{print $1}')"
+fi
 
-# ── Dates (yesterday) ────────────────────────────────────────────────────────
-YESTERDAY=$(date -v-1d +%Y-%m-%d)
+# ── Dates ────────────────────────────────────────────────────────────────────
+if [[ -n "$TARGET_DATE" ]]; then
+    [[ "$TARGET_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
+        || { echo "ERROR: date must be YYYY-MM-DD, got: $TARGET_DATE" >&2; exit 1; }
+    YESTERDAY="$TARGET_DATE"
+else
+    YESTERDAY=$(date -v-1d +%Y-%m-%d)
+fi
 DAY_START="${YESTERDAY}T00:00:00.000Z"
 DAY_END="${YESTERDAY}T23:59:59.999Z"
 
@@ -33,10 +66,25 @@ mkdir -p "$OUTPUT_DIR"
 # ── Helper: fetch JSON from Nightscout ───────────────────────────────────────
 ns_get() {
     local path="$1"
-    curl -sf \
-        -H "api-secret: $API_SECRET_HASH" \
+    local sep="?" ; [[ "$path" == *"?"* ]] && sep="&"
+    local url="${NIGHTSCOUT_URL}${path}${AUTH_PARAM:+${sep}${AUTH_PARAM}}"
+    local response http_code body
+
+    response=$(curl -gs -w "\n__HTTP_CODE__:%{http_code}" \
+        ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
         -H "Accept: application/json" \
-        "${NIGHTSCOUT_URL}${path}"
+        "$url" 2>&1) || { echo "ERROR: curl failed (exit $?): $response" >&2; return 1; }
+
+    http_code="${response##*__HTTP_CODE__:}"
+    body="${response%$'\n'__HTTP_CODE__:*}"
+
+    if [[ "$http_code" != "200" ]]; then
+        echo "ERROR: HTTP $http_code from $url" >&2
+        echo "       Response: $body" >&2
+        return 1
+    fi
+
+    echo "$body"
 }
 
 # ── CGM entries ──────────────────────────────────────────────────────────────
