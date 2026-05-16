@@ -82,7 +82,7 @@ def empirical_isf(entries, treatments):
                     return v
         return None
 
-    results = []
+    by_block = defaultdict(list)
     for i, t in enumerate(treatments):
         if t["insulin"] <= 0:
             continue
@@ -103,11 +103,13 @@ def empirical_isf(entries, treatments):
         if sgv_start and nadir and sgv_start > nadir:
             observed = (sgv_start - nadir) / t["insulin"]
             if 10 < observed < 250:
-                results.append(observed)
+                block = (t["dt"].hour // 2) * 2
+                by_block[block].append(observed)
 
-    if results:
-        return statistics.median(results), len(results)
-    return None, 0
+    all_results = [v for vals in by_block.values() for v in vals]
+    overall = (statistics.median(all_results), len(all_results)) if all_results else (None, 0)
+    hourly = {block: (statistics.median(vals), len(vals)) for block, vals in by_block.items()}
+    return overall, hourly
 
 
 def fasting_bg_trends(entries, treatments):
@@ -195,7 +197,7 @@ def main():
     else:
         print("  No insulin data found.")
 
-    emp_isf, n_corrections = empirical_isf(entries, treatments)
+    (emp_isf, n_corrections), isf_by_block = empirical_isf(entries, treatments)
     if emp_isf:
         print(f"  ISF (observed):   {emp_isf:.0f} mg/dL per unit  ({n_corrections} corrections analysed)")
 
@@ -225,6 +227,17 @@ def main():
                 verdict = "✓ ok      "
             direction = "+" if rate >= 0 else ""
             print(f"  {block:02d}:00–{block+2:02d}:00  {direction}{rate:+.1f} mg/dL/hr  {verdict}  {bar(rate, scale=5)}")
+
+    # ── ISF by time block ─────────────────────────────────────────────────────
+    if isf_by_block:
+        print()
+        print("── Observed ISF by time block (corrections only, ≥2 samples) ────────")
+        for block in sorted(isf_by_block):
+            isf, n = isf_by_block[block]
+            if n < 2:
+                continue
+            marker = "  ← strong" if isf < 30 else ("  ← weak  " if isf > 80 else "")
+            print(f"  {block:02d}:00–{block+2:02d}:00  {isf:3.0f} mg/dL/U  (n={n}){marker}")
 
     # ── Hourly average BG ─────────────────────────────────────────────────────
     hourly = hourly_avg_bg(entries)
