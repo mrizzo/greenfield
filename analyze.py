@@ -149,6 +149,16 @@ def hourly_avg_bg(entries):
     return {h: statistics.mean(v) for h, v in by_hour.items()}
 
 
+def hourly_insulin(treatments):
+    by_hour = defaultdict(list)
+    days = {t["dt"].date() for t in treatments if t["insulin"] > 0}
+    n_days = len(days) or 1
+    for t in treatments:
+        if t["insulin"] > 0:
+            by_hour[t["dt"].hour].append(t["insulin"])
+    return {h: sum(v) / n_days for h, v in by_hour.items()}
+
+
 def bar(value, scale=10, width=20):
     filled = min(int(abs(value) / scale), width)
     return "█" * filled
@@ -225,6 +235,16 @@ def main():
             avg = hourly[hour]
             flag = "  ← high" if avg > 180 else ("  ← low " if avg < 70 else "")
             print(f"  {hour:02d}:00  {avg:5.0f} mg/dL  {bar(avg, scale=10)}{flag}")
+
+    # ── Hourly insulin delivery ───────────────────────────────────────────────
+    ins_by_hour = hourly_insulin(treatments)
+    if ins_by_hour:
+        print()
+        print("── Avg insulin delivery by hour (U/day averaged) ───────────────────")
+        max_u = max(ins_by_hour.values())
+        for hour in sorted(ins_by_hour):
+            u = ins_by_hour[hour]
+            print(f"  {hour:02d}:00  {u:4.2f} U  {bar(u, scale=max_u / 20)}")
 
     print()
     print("Note: estimates only. Verify with your endocrinologist before changing settings.")
