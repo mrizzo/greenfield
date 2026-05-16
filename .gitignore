@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Local configs and sensitive
+webscr-config
+.pr_body.txt
+
+# Nightscout output files
+*_entries.csv
+*_treatments.csv
+*_profile.json
+
+# Logs
+*.log
+
+# Executables
+*.exe
+
+# Node
+node_modules/
