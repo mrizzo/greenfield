@@ -2,6 +2,7 @@
 """Suggest ISF and basal rates from Nightscout CSV exports."""
 
 import argparse
+import bisect
 import csv
 import glob
 import os
@@ -82,14 +83,15 @@ def empirical_isf(entries, treatments):
                     return v
         return None
 
+    carb_times = sorted(t["dt"] for t in treatments if t["carbs"] > 0)
+    window = timedelta(hours=2)
+
     by_block = defaultdict(list)
-    for i, t in enumerate(treatments):
+    for t in treatments:
         if t["insulin"] <= 0:
             continue
-        nearby_carbs = any(
-            abs((o["dt"] - t["dt"]).total_seconds()) < 7200 and o["carbs"] > 0
-            for o in treatments if o is not t
-        )
+        lo = bisect.bisect_left(carb_times, t["dt"] - window)
+        nearby_carbs = lo < len(carb_times) and carb_times[lo] <= t["dt"] + window
         if nearby_carbs:
             continue
 
