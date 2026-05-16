@@ -41,11 +41,17 @@ def load_treatments(directory):
                 dt = parse_dt(row["date"], row["time"])
                 if not dt:
                     continue
+                rate = float(row["rate"]) if row.get("rate") else 0.0
+                duration = float(row["duration"]) if row.get("duration") else 0.0
+                # For temp basals, insulin delivered = rate (U/hr) * duration (min) / 60
+                basal_delivered = rate * duration / 60 if rate and duration else 0.0
                 rows.append({
                     "dt": dt,
                     "type": row.get("eventType", ""),
-                    "insulin": float(row["insulin"]) if row.get("insulin") else 0.0,
+                    "insulin": float(row["insulin"]) if row.get("insulin") else basal_delivered,
                     "carbs": float(row["carbs"]) if row.get("carbs") else 0.0,
+                    "rate": rate,
+                    "duration": duration,
                 })
     return sorted(rows, key=lambda r: r["dt"])
 

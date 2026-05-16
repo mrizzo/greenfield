@@ -117,7 +117,7 @@ if [[ "${DOWNLOAD_TREATMENTS:-1}" == "1" ]]; then
 
     ns_get "/api/v1/treatments.json?find[created_at][\$gte]=${DAY_START}&find[created_at][\$lte]=${DAY_END}&count=1000" \
     | jq -r '
-        ["date","time","eventType","insulin","carbs","glucose","glucoseType","units","notes","enteredBy"],
+        ["date","time","eventType","insulin","carbs","glucose","glucoseType","units","rate","duration","notes","enteredBy"],
         (.[] | [
             (.created_at | split("T")[0]),
             (.created_at | split("T")[1] | split(".")[0] | split("Z")[0]),
@@ -127,6 +127,8 @@ if [[ "${DOWNLOAD_TREATMENTS:-1}" == "1" ]]; then
             (.glucose // ""),
             (.glucoseType // ""),
             (.units // ""),
+            (.rate // ""),
+            (.duration // ""),
             (.notes // ""),
             (.enteredBy // "")
         ])
