@@ -2,14 +2,30 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG="$SCRIPT_DIR/config"
 DOWNLOADER="$SCRIPT_DIR/nightscout-dl.sh"
 PLIST_ID="com.nightscout.downloader"
 PLIST_PATH="$HOME/Library/LaunchAgents/${PLIST_ID}.plist"
 LOG_DIR="$HOME/Library/Logs/nightscout-dl"
 
-# ── Validate ──────────────────────────────────────────────────────────────────
-if [[ "$1" == "uninstall" ]]; then
+usage() {
+    echo "Usage: $(basename "$0") [-c config] [uninstall]" >&2
+    echo "  -c  path to config file (default: \$SCRIPT_DIR/config)" >&2
+    exit 1
+}
+
+CONFIG="${NIGHTSCOUT_CONFIG:-$SCRIPT_DIR/config}"
+while getopts ":c:h" opt; do
+    case $opt in
+        c) CONFIG="$OPTARG" ;;
+        h) usage ;;
+        :) echo "ERROR: -$OPTARG requires an argument" >&2; usage ;;
+        \?) echo "ERROR: unknown option -$OPTARG" >&2; usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+# ── Uninstall ─────────────────────────────────────────────────────────────────
+if [[ "${1:-}" == "uninstall" ]]; then
     echo "Uninstalling..."
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
     rm -f "$PLIST_PATH"
@@ -17,21 +33,27 @@ if [[ "$1" == "uninstall" ]]; then
     exit 0
 fi
 
-if [[ "$NIGHTSCOUT_URL" == *"YOUR-SITE"* ]] 2>/dev/null || ! grep -q "NIGHTSCOUT_URL" "$CONFIG"; then
-    source "$CONFIG"
+# ── Load config ───────────────────────────────────────────────────────────────
+if [[ ! -f "$CONFIG" ]]; then
+    echo "ERROR: config not found at $CONFIG" >&2; exit 1
 fi
 source "$CONFIG"
 
-if [[ "$NIGHTSCOUT_URL" == *"YOUR-SITE"* ]] || [[ "$API_SECRET" == "your-api-secret-here" ]]; then
-    echo "ERROR: fill in NIGHTSCOUT_URL and API_SECRET in $CONFIG before installing." >&2
-    exit 1
+# ── Validate ──────────────────────────────────────────────────────────────────
+if [[ "${NIGHTSCOUT_URL:-}" == *"YOUR-SITE"* ]] || [[ -z "${NIGHTSCOUT_URL:-}" ]]; then
+    echo "ERROR: set NIGHTSCOUT_URL in $CONFIG" >&2; exit 1
+fi
+if [[ -z "${NS_TOKEN:-}" ]] && [[ -z "${API_SECRET:-}" ]]; then
+    echo "ERROR: set NS_TOKEN or API_SECRET in $CONFIG" >&2; exit 1
 fi
 
 chmod +x "$DOWNLOADER"
 
 # ── Write plist ───────────────────────────────────────────────────────────────
-mkdir -p "$LOG_DIR"
-mkdir -p "$HOME/Library/LaunchAgents"
+RUN_HOUR="${RUN_HOUR:-1}"
+RUN_MINUTE="${RUN_MINUTE:-0}"
+
+mkdir -p "$LOG_DIR" "$HOME/Library/LaunchAgents"
 
 cat > "$PLIST_PATH" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -46,6 +68,8 @@ cat > "$PLIST_PATH" <<PLIST
     <array>
         <string>/bin/bash</string>
         <string>${DOWNLOADER}</string>
+        <string>-c</string>
+        <string>${CONFIG}</string>
     </array>
 
     <key>StartCalendarInterval</key>
@@ -71,8 +95,8 @@ PLIST
 launchctl unload "$PLIST_PATH" 2>/dev/null || true
 launchctl load "$PLIST_PATH"
 
-echo "Installed. The script will run daily at ${RUN_HOUR}:$(printf '%02d' "$RUN_MINUTE")."
+echo "Installed. Runs daily at ${RUN_HOUR}:$(printf '%02d' "$RUN_MINUTE")."
 echo "Logs: $LOG_DIR/"
 echo ""
-echo "To test right now:  bash $DOWNLOADER"
+echo "To test right now:  bash $DOWNLOADER -c $CONFIG"
 echo "To uninstall:       bash $SCRIPT_DIR/install.sh uninstall"
