@@ -46,10 +46,15 @@ def load_treatments(directory):
                 duration = float(row["duration"]) if row.get("duration") else 0.0
                 # For temp basals, insulin delivered = rate (U/hr) * duration (min) / 60
                 basal_delivered = rate * duration / 60 if rate and duration else 0.0
+                event_type = row.get("eventType", "")
+                is_basal = "temp basal" in event_type.lower() or "basal" in event_type.lower()
+                insulin = float(row["insulin"]) if row.get("insulin") else basal_delivered
                 rows.append({
                     "dt": dt,
-                    "type": row.get("eventType", ""),
-                    "insulin": float(row["insulin"]) if row.get("insulin") else basal_delivered,
+                    "type": event_type,
+                    "insulin": insulin,
+                    "bolus": 0.0 if is_basal else insulin,
+                    "basal": insulin if is_basal else 0.0,
                     "carbs": float(row["carbs"]) if row.get("carbs") else 0.0,
                     "rate": rate,
                     "duration": duration,
@@ -58,14 +63,22 @@ def load_treatments(directory):
 
 
 def tdd_stats(treatments):
-    by_day = defaultdict(float)
+    by_day_total = defaultdict(float)
+    by_day_bolus = defaultdict(float)
+    by_day_basal = defaultdict(float)
     for t in treatments:
         if t["insulin"] > 0:
-            by_day[t["dt"].date()] += t["insulin"]
-    if not by_day:
-        return None, []
-    values = list(by_day.values())
-    return statistics.mean(values), values
+            d = t["dt"].date()
+            by_day_total[d] += t["insulin"]
+            by_day_bolus[d] += t["bolus"]
+            by_day_basal[d] += t["basal"]
+    if not by_day_total:
+        return None, [], None, None
+    days = sorted(by_day_total)
+    totals = [by_day_total[d] for d in days]
+    boluses = [by_day_bolus[d] for d in days]
+    basals = [by_day_basal[d] for d in days]
+    return statistics.median(totals), totals, statistics.median(boluses), statistics.median(basals)
 
 
 def empirical_isf(entries, treatments):
@@ -154,13 +167,17 @@ def hourly_avg_bg(entries):
 
 
 def hourly_insulin(treatments):
-    by_hour = defaultdict(list)
+    bolus_by_hour = defaultdict(float)
+    basal_by_hour = defaultdict(float)
     days = {t["dt"].date() for t in treatments if t["insulin"] > 0}
     n_days = len(days) or 1
     for t in treatments:
         if t["insulin"] > 0:
-            by_hour[t["dt"].hour].append(t["insulin"])
-    return {h: sum(v) / n_days for h, v in by_hour.items()}
+            h = t["dt"].hour
+            bolus_by_hour[h] += t["bolus"]
+            basal_by_hour[h] += t["basal"]
+    hours = sorted(set(bolus_by_hour) | set(basal_by_hour))
+    return {h: (bolus_by_hour[h] / n_days, basal_by_hour[h] / n_days) for h in hours}
 
 
 def bar(value, scale=10, width=20):
@@ -189,12 +206,14 @@ def main():
     print(f"  {days} days  |  {date_range}  |  {len(entries)} readings  |  {len(treatments)} treatments\n")
 
     # ── TDD & ISF ─────────────────────────────────────────────────────────────
-    avg_tdd, tdd_values = tdd_stats(treatments)
+    median_tdd, tdd_values, median_bolus, median_basal = tdd_stats(treatments)
     print("── Insulin ──────────────────────────────────────────────────────────")
-    if avg_tdd:
-        isf_rule = 1700 / avg_tdd
+    if median_tdd:
+        isf_rule = 1700 / median_tdd
         tdd_min, tdd_max = min(tdd_values), max(tdd_values)
-        print(f"  Avg TDD:          {avg_tdd:.1f} U/day  (range {tdd_min:.1f}–{tdd_max:.1f})")
+        print(f"  Median TDD:       {median_tdd:.1f} U/day  (range {tdd_min:.1f}–{tdd_max:.1f})")
+        print(f"    Bolus:          {median_bolus:.1f} U/day")
+        print(f"    Basal:          {median_basal:.1f} U/day")
         print(f"  ISF (1700 rule):  {isf_rule:.0f} mg/dL per unit")
     else:
         print("  No insulin data found.")
@@ -206,8 +225,8 @@ def main():
     # ── Basal estimate ────────────────────────────────────────────────────────
     print()
     print("── Basal estimate ───────────────────────────────────────────────────")
-    if avg_tdd:
-        total_basal = avg_tdd * 0.45
+    if median_tdd:
+        total_basal = median_tdd * 0.45
         flat_rate = total_basal / 24
         print(f"  Total basal/day:  ~{total_basal:.1f} U  (45% of TDD)")
         print(f"  Flat rate:        ~{flat_rate:.2f} U/hr")
@@ -256,10 +275,15 @@ def main():
     if ins_by_hour:
         print()
         print("── Avg insulin delivery by hour (U/day averaged) ───────────────────")
-        max_u = max(ins_by_hour.values())
+        print(f"  {'hour':<6}  {'bolus':>5}  {'basal':>5}  {'total':>5}")
+        max_u = max(b + s for b, s in ins_by_hour.values())
+        scale = max_u / 20
         for hour in sorted(ins_by_hour):
-            u = ins_by_hour[hour]
-            print(f"  {hour:02d}:00  {u:4.2f} U  {bar(u, scale=max_u / 20)}")
+            bolus, basal = ins_by_hour[hour]
+            total = bolus + basal
+            bolus_bar = "▓" * min(int(bolus / scale), 20)
+            basal_bar = "░" * min(int(basal / scale), 20)
+            print(f"  {hour:02d}:00   {bolus:4.2f}   {basal:4.2f}   {total:4.2f}  {bolus_bar}{basal_bar}")
 
     print()
     print("Note: estimates only. Verify with your endocrinologist before changing settings.")
