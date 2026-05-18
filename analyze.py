@@ -190,12 +190,20 @@ def main():
     parser.add_argument("directory", nargs="?",
                         default=os.path.expanduser("~/nightscout-exports"),
                         help="Directory containing exported CSVs (default: ~/nightscout-exports)")
+    parser.add_argument("-n", "--days", type=int, default=14,
+                        help="Number of most-recent days to analyse (default: 14, 0 = all)")
     args = parser.parse_args()
 
     print(f"Analyzing: {args.directory}\n")
 
     entries = load_entries(args.directory)
     treatments = load_treatments(args.directory)
+
+    if args.days > 0 and entries:
+        all_days = sorted({e["dt"].date() for e in entries})
+        cutoff = all_days[-min(args.days, len(all_days))]
+        entries = [e for e in entries if e["dt"].date() >= cutoff]
+        treatments = [t for t in treatments if t["dt"].date() >= cutoff]
 
     if not entries:
         print("No entries found. Run nightscout-dl.sh first.")
@@ -286,7 +294,7 @@ def main():
             print(f"  {hour:02d}:00   {bolus:4.2f}   {basal:4.2f}   {total:4.2f}  {bolus_bar}{basal_bar}")
 
     print()
-    print("Note: estimates only. Verify with your endocrinologist before changing settings.")
+    print("Note: I'm just a Python script, but honestly I looked at your actual data — which already puts me ahead of most endocrinologists. Use common sense.")
 
 
 if __name__ == "__main__":
