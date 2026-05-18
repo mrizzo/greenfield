@@ -345,7 +345,16 @@ def main():
                         help="Directory containing exported CSVs (default: ~/nightscout-exports)")
     parser.add_argument("-n", "--days", type=int, default=14,
                         help="Number of most-recent days to analyse (default: 14, 0 = all)")
+    parser.add_argument("-d", "--date", type=str, default=None,
+                        help="Single day to analyse (YYYY-MM-DD); overrides -n")
     args = parser.parse_args()
+
+    if args.date:
+        try:
+            single_day = datetime.strptime(args.date, "%Y-%m-%d").date()
+        except ValueError:
+            print(f"ERROR: date must be YYYY-MM-DD, got: {args.date}")
+            return
 
     print(f"Analyzing: {args.directory}\n")
 
@@ -353,7 +362,10 @@ def main():
     entries = load_entries(args.directory, tz=tz)
     treatments = load_treatments(args.directory, tz=tz)
 
-    if args.days > 0 and entries:
+    if args.date:
+        entries = [e for e in entries if e["dt"].date() == single_day]
+        treatments = [t for t in treatments if t["dt"].date() == single_day]
+    elif args.days > 0 and entries:
         all_days = sorted({e["dt"].date() for e in entries})
         cutoff = all_days[-min(args.days, len(all_days))]
         entries = [e for e in entries if e["dt"].date() >= cutoff]
