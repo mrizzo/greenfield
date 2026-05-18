@@ -58,8 +58,18 @@ if [[ -n "$TARGET_DATE" ]]; then
 else
     YESTERDAY=$(date -v-1d +%Y-%m-%d)
 fi
-DAY_START="${YESTERDAY}T00:00:00.000Z"
-DAY_END="${YESTERDAY}T23:59:59.999Z"
+TZ_OFFSET=$(date +%z)  # e.g. +0900
+TZ_HOURS=$(echo "$TZ_OFFSET" | sed 's/+//' | sed 's/-//' | cut -c1-2)
+TZ_SIGN=$(echo "$TZ_OFFSET" | cut -c1)
+if [[ "$TZ_SIGN" == "+" ]]; then
+    UTC_START=$(date -v-${TZ_HOURS}H -jf "%Y-%m-%dT%H:%M:%S" "${YESTERDAY}T00:00:00" +"%Y-%m-%dT%H:%M:%S.000Z")
+    UTC_END=$(date -v-${TZ_HOURS}H -jf "%Y-%m-%dT%H:%M:%S" "${YESTERDAY}T23:59:59" +"%Y-%m-%dT%H:%M:%S.999Z")
+else
+    UTC_START=$(date -v+${TZ_HOURS}H -jf "%Y-%m-%dT%H:%M:%S" "${YESTERDAY}T00:00:00" +"%Y-%m-%dT%H:%M:%S.000Z")
+    UTC_END=$(date -v+${TZ_HOURS}H -jf "%Y-%m-%dT%H:%M:%S" "${YESTERDAY}T23:59:59" +"%Y-%m-%dT%H:%M:%S.999Z")
+fi
+DAY_START="$UTC_START"
+DAY_END="$UTC_END"
 
 mkdir -p "$OUTPUT_DIR"
 
