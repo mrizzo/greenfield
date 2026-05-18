@@ -5,10 +5,12 @@ import argparse
 import bisect
 import csv
 import glob
+import json
 import os
 import statistics
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 def parse_dt(date_str, time_str):
@@ -18,67 +20,110 @@ def parse_dt(date_str, time_str):
         return None
 
 
-def load_entries(directory):
+def epoch_ms_to_dt(epoch_ms, tz=None):
+    dt_utc = datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc)
+    return dt_utc.astimezone(tz).replace(tzinfo=None) if tz else dt_utc.replace(tzinfo=None)
+
+
+def load_entries(directory, tz=None):
     rows = []
     for f in sorted(glob.glob(os.path.join(directory, "*_entries.csv"))):
         with open(f, newline="") as fh:
             for row in csv.DictReader(fh):
                 if not row.get("sgv_mgdl"):
                     continue
-                dt = parse_dt(row["date"], row["time"])
-                if dt:
-                    try:
-                        rows.append({"dt": dt, "sgv": int(row["sgv_mgdl"])})
-                    except ValueError:
-                        pass
+                try:
+                    dt = epoch_ms_to_dt(int(float(row["epoch_ms"])), tz)
+                    rows.append({"dt": dt, "sgv": int(row["sgv_mgdl"])})
+                except (ValueError, KeyError):
+                    pass
     return sorted(rows, key=lambda r: r["dt"])
 
 
-def load_treatments(directory):
+def load_treatments(directory, tz=None):
     rows = []
     for f in sorted(glob.glob(os.path.join(directory, "*_treatments.csv"))):
         with open(f, newline="") as fh:
             for row in csv.DictReader(fh):
-                dt = parse_dt(row["date"], row["time"])
+                try:
+                    dt = epoch_ms_to_dt(int(float(row["epoch_ms"])), tz)
+                except (KeyError, ValueError):
+                    dt = parse_dt(row.get("date", ""), row.get("time", ""))
                 if not dt:
                     continue
                 rate = float(row["rate"]) if row.get("rate") else 0.0
                 duration = float(row["duration"]) if row.get("duration") else 0.0
-                # For temp basals, insulin delivered = rate (U/hr) * duration (min) / 60
-                basal_delivered = rate * duration / 60 if rate and duration else 0.0
                 event_type = row.get("eventType", "")
-                is_basal = "temp basal" in event_type.lower() or "basal" in event_type.lower()
-                insulin = float(row["insulin"]) if row.get("insulin") else basal_delivered
+                is_basal = event_type.lower() == "temp basal"
+                rate_delivered = rate * duration / 60 if rate and duration else 0.0
+                insulin = float(row["insulin"]) if row.get("insulin") else (0.0 if is_basal else rate_delivered)
                 rows.append({
                     "dt": dt,
                     "type": event_type,
                     "insulin": insulin,
                     "bolus": 0.0 if is_basal else insulin,
-                    "basal": insulin if is_basal else 0.0,
+                    "basal": 0.0,
                     "carbs": float(row["carbs"]) if row.get("carbs") else 0.0,
                     "rate": rate,
                     "duration": duration,
+                    "is_basal": is_basal,
                 })
-    return sorted(rows, key=lambda r: r["dt"])
+
+    rows = sorted(rows, key=lambda r: r["dt"])
+
+    # Compute actual basal delivery: active time = time until next temp basal, capped at programmed duration
+    temp_basals = [r for r in rows if r["is_basal"]]
+    for i, t in enumerate(temp_basals):
+        if t["rate"] == 0.0:
+            continue
+        programmed_min = t["duration"]
+        if i + 1 < len(temp_basals):
+            gap_min = (temp_basals[i + 1]["dt"] - t["dt"]).total_seconds() / 60
+            active_min = min(programmed_min, gap_min)
+        else:
+            active_min = programmed_min
+        delivered = t["rate"] * active_min / 60
+        t["basal"] = delivered
+        t["insulin"] = delivered
+
+    return rows
 
 
 def tdd_stats(treatments):
-    by_day_total = defaultdict(float)
     by_day_bolus = defaultdict(float)
-    by_day_basal = defaultdict(float)
+    by_day_base = defaultdict(float)
+    by_day_pos = defaultdict(float)
+    by_day_neg = defaultdict(float)
     for t in treatments:
-        if t["insulin"] > 0:
-            d = t["dt"].date()
-            by_day_total[d] += t["insulin"]
+        d = t["dt"].date()
+        if t.get("type") == "Scheduled Basal":
+            by_day_base[d] += t["basal"]
+        elif t.get("is_basal"):
+            if t["basal"] >= 0:
+                by_day_pos[d] += t["basal"]
+            else:
+                by_day_neg[d] += t["basal"]
+        elif t["insulin"] > 0:
             by_day_bolus[d] += t["bolus"]
-            by_day_basal[d] += t["basal"]
-    if not by_day_total:
-        return None, [], None, None
-    days = sorted(by_day_total)
-    totals = [by_day_total[d] for d in days]
-    boluses = [by_day_bolus[d] for d in days]
-    basals = [by_day_basal[d] for d in days]
-    return statistics.median(totals), totals, statistics.median(boluses), statistics.median(basals)
+    all_days = sorted(set(by_day_base) | set(by_day_bolus) | set(by_day_pos) | set(by_day_neg))
+    if not all_days:
+        return None
+    def med(d): return statistics.median([d[day] for day in all_days]) if d else 0.0
+    base = med(by_day_base)
+    pos  = med(by_day_pos)
+    neg  = med(by_day_neg)
+    bolus = med(by_day_bolus)
+    total_basal = base + pos + neg
+    totals = [by_day_base[d] + by_day_pos[d] + by_day_neg[d] + by_day_bolus[d] for d in all_days]
+    return {
+        "median_tdd": statistics.median(totals),
+        "tdd_range": (min(totals), max(totals)),
+        "bolus": bolus,
+        "base": base,
+        "pos_temp": pos,
+        "neg_temp": neg,
+        "total_basal": total_basal,
+    }
 
 
 def empirical_isf(entries, treatments):
@@ -134,6 +179,7 @@ def fasting_bg_trends(entries, treatments):
     Positive = BG rising (basal too low), negative = falling (basal too high).
     """
     block_rates = defaultdict(list)
+    active_times = sorted(t["dt"] for t in treatments if t["insulin"] > 0 or t["carbs"] > 0)
 
     for i in range(len(entries) - 1):
         a, b = entries[i], entries[i + 1]
@@ -142,10 +188,8 @@ def fasting_bg_trends(entries, treatments):
             continue
 
         window_start = a["dt"] - timedelta(hours=4)
-        if any(
-            window_start <= t["dt"] <= b["dt"] and (t["insulin"] > 0 or t["carbs"] > 0)
-            for t in treatments
-        ):
+        lo = bisect.bisect_left(active_times, window_start)
+        if lo < len(active_times) and active_times[lo] <= b["dt"]:
             continue
 
         rate = (b["sgv"] - a["sgv"]) / (gap_min / 60)  # mg/dL per hour
@@ -169,15 +213,124 @@ def hourly_avg_bg(entries):
 def hourly_insulin(treatments):
     bolus_by_hour = defaultdict(float)
     basal_by_hour = defaultdict(float)
-    days = {t["dt"].date() for t in treatments if t["insulin"] > 0}
+    days = {t["dt"].date() for t in treatments if t.get("type") == "Scheduled Basal"}
     n_days = len(days) or 1
     for t in treatments:
-        if t["insulin"] > 0:
-            h = t["dt"].hour
+        h = t["dt"].hour
+        if t["bolus"] > 0:
             bolus_by_hour[h] += t["bolus"]
+        if t["basal"] != 0:
             basal_by_hour[h] += t["basal"]
     hours = sorted(set(bolus_by_hour) | set(basal_by_hour))
     return {h: (bolus_by_hour[h] / n_days, basal_by_hour[h] / n_days) for h in hours}
+
+
+def load_profiles(directory):
+    """Return (profiles_dict, timezone) where profiles_dict maps date -> basal schedule."""
+    profile_files = sorted(glob.glob(os.path.join(directory, "*_profile.json")))
+    result = {}
+    tz = None
+    for path in profile_files:
+        fname = os.path.basename(path)
+        try:
+            date = datetime.strptime(fname[:10], "%Y-%m-%d").date()
+            with open(path) as f:
+                data = json.load(f)
+            store = data[0]['store']['default']
+            basal = store['basal']
+            result[date] = sorted((e['timeAsSeconds'], e['value']) for e in basal)
+            if tz is None and store.get('timezone'):
+                try:
+                    tz = ZoneInfo(store['timezone'])
+                except ZoneInfoNotFoundError:
+                    pass
+        except (KeyError, IndexError, json.JSONDecodeError, ValueError):
+            continue
+    return result, tz
+
+
+def profile_for_date(profiles, date):
+    """Return the basal schedule for the most recent profile on or before date."""
+    candidates = [d for d in profiles if d <= date]
+    if not candidates:
+        return profiles[min(profiles)] if profiles else None
+    return profiles[max(candidates)]
+
+
+def _scheduled_rate_at(schedule, seconds_from_midnight):
+    rate = schedule[0][1]
+    for secs, value in schedule:
+        if secs <= seconds_from_midnight:
+            rate = value
+        else:
+            break
+    return rate
+
+
+def add_scheduled_basal(treatments, profiles, dates):
+    """
+    Mirror Nightscout's method: add full scheduled basal for every hour of each
+    day, then let each temp basal entry contribute only its offset
+    (actual_rate - scheduled_rate) * active_time.  Sum = correct total basal.
+    """
+    extra = []
+    tb_by_date = defaultdict(list)
+    for t in treatments:
+        if t["is_basal"]:
+            tb_by_date[t["dt"].date()].append(t)
+
+    for date in dates:
+        basal_schedule = profile_for_date(profiles, date)
+        if not basal_schedule:
+            continue
+        day_start = datetime(date.year, date.month, date.day)
+        day_end = day_start + timedelta(days=1)
+
+        # 1. Add full scheduled basal broken into hour-aligned segments
+        current = day_start
+        while current < day_end:
+            secs = (current - day_start).total_seconds()
+            rate = _scheduled_rate_at(basal_schedule, secs)
+            next_hour = current.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+            next_schedule = day_end
+            for break_secs, _ in basal_schedule:
+                bp = day_start + timedelta(seconds=break_secs)
+                if bp > current:
+                    next_schedule = min(next_schedule, bp)
+                    break
+            seg_end = min(next_hour, next_schedule, day_end)
+            duration_min = (seg_end - current).total_seconds() / 60
+            delivered = rate * duration_min / 60
+            extra.append({
+                "dt": current,
+                "type": "Scheduled Basal",
+                "insulin": delivered,
+                "bolus": 0.0,
+                "basal": delivered,
+                "carbs": 0.0,
+                "rate": rate,
+                "duration": duration_min,
+                "is_basal": True,
+            })
+            current = seg_end
+
+        day_tbs = sorted(tb_by_date[date], key=lambda t: t["dt"])
+        for i, tb in enumerate(day_tbs):
+            start = max(tb["dt"], day_start)
+            if start >= day_end:
+                continue
+            programmed_end = tb["dt"] + timedelta(minutes=tb["duration"])
+            next_start = day_tbs[i + 1]["dt"] if i + 1 < len(day_tbs) else day_end
+            end = min(programmed_end, next_start, day_end)
+            if end <= start:
+                continue
+            duration_hr = (end - start).total_seconds() / 3600
+            sched_rate = _scheduled_rate_at(basal_schedule, (start - day_start).total_seconds())
+            offset = (tb["rate"] - sched_rate) * duration_hr
+            tb["basal"] = offset
+            tb["insulin"] = offset
+
+    return sorted(treatments + extra, key=lambda r: r["dt"])
 
 
 def bar(value, scale=10, width=20):
@@ -196,8 +349,9 @@ def main():
 
     print(f"Analyzing: {args.directory}\n")
 
-    entries = load_entries(args.directory)
-    treatments = load_treatments(args.directory)
+    profiles, tz = load_profiles(args.directory)
+    entries = load_entries(args.directory, tz=tz)
+    treatments = load_treatments(args.directory, tz=tz)
 
     if args.days > 0 and entries:
         all_days = sorted({e["dt"].date() for e in entries})
@@ -209,20 +363,28 @@ def main():
         print("No entries found. Run nightscout-dl.sh first.")
         return
 
+    if profiles:
+        dates = sorted({e["dt"].date() for e in entries})
+        treatments = add_scheduled_basal(treatments, profiles, dates)
+    else:
+        print("Warning: no profile found — scheduled basal gaps will not be filled.")
+
     days = len({e["dt"].date() for e in entries})
     date_range = f"{entries[0]['dt'].date()} → {entries[-1]['dt'].date()}"
     print(f"  {days} days  |  {date_range}  |  {len(entries)} readings  |  {len(treatments)} treatments\n")
 
     # ── TDD & ISF ─────────────────────────────────────────────────────────────
-    median_tdd, tdd_values, median_bolus, median_basal = tdd_stats(treatments)
+    stats = tdd_stats(treatments)
     print("── Insulin ──────────────────────────────────────────────────────────")
-    if median_tdd:
-        isf_rule = 1700 / median_tdd
-        tdd_min, tdd_max = min(tdd_values), max(tdd_values)
-        print(f"  Median TDD:       {median_tdd:.1f} U/day  (range {tdd_min:.1f}–{tdd_max:.1f})")
-        print(f"    Bolus:          {median_bolus:.1f} U/day")
-        print(f"    Basal:          {median_basal:.1f} U/day")
-        print(f"  ISF (1700 rule):  {isf_rule:.0f} mg/dL per unit")
+    if stats:
+        tdd_min, tdd_max = stats["tdd_range"]
+        print(f"  Median TDD:       {stats['median_tdd']:.1f} U/day  (range {tdd_min:.1f}–{tdd_max:.1f})")
+        print(f"    Bolus:          {stats['bolus']:.1f} U/day")
+        print(f"    Base basal:     {stats['base']:.1f} U/day")
+        print(f"    Pos temp:      +{stats['pos_temp']:.1f} U/day  (treatments only)")
+        print(f"    Neg temp:       {stats['neg_temp']:.1f} U/day  (treatments only)")
+        print(f"    Total basal:    {stats['total_basal']:.1f} U/day")
+        print(f"  ISF (1700 rule):  {1700 / stats['median_tdd']:.0f} mg/dL per unit")
     else:
         print("  No insulin data found.")
 
@@ -233,11 +395,10 @@ def main():
     # ── Basal estimate ────────────────────────────────────────────────────────
     print()
     print("── Basal estimate ───────────────────────────────────────────────────")
-    if median_tdd:
-        total_basal = median_tdd * 0.45
-        flat_rate = total_basal / 24
-        print(f"  Total basal/day:  ~{total_basal:.1f} U  (45% of TDD)")
-        print(f"  Flat rate:        ~{flat_rate:.2f} U/hr")
+    if stats:
+        total_basal = stats["total_basal"]
+        print(f"  Total basal/day:  ~{total_basal:.1f} U")
+        print(f"  Flat rate:        ~{total_basal / 24:.2f} U/hr")
 
     # ── Fasting drift by time block ───────────────────────────────────────────
     trends = fasting_bg_trends(entries, treatments)
@@ -254,8 +415,7 @@ def main():
                 verdict = "↓ too high"
             else:
                 verdict = "✓ ok      "
-            direction = "+" if rate >= 0 else ""
-            print(f"  {block:02d}:00–{block+2:02d}:00  {direction}{rate:+.1f} mg/dL/hr  {verdict}  {bar(rate, scale=5)}")
+            print(f"  {block:02d}:00–{block+2:02d}:00  {rate:+.1f} mg/dL/hr  {verdict}  {bar(rate, scale=5)}")
 
     # ── ISF by time block ─────────────────────────────────────────────────────
     if isf_by_block:
@@ -284,14 +444,15 @@ def main():
         print()
         print("── Avg insulin delivery by hour (U/day averaged) ───────────────────")
         print(f"  {'hour':<6}  {'bolus':>5}  {'basal':>5}  {'total':>5}")
-        max_u = max(b + s for b, s in ins_by_hour.values())
-        scale = max_u / 20
+        max_u = max(b + max(s, 0) for b, s in ins_by_hour.values())
+        scale = max_u / 20 if max_u else 1
         for hour in sorted(ins_by_hour):
             bolus, basal = ins_by_hour[hour]
             total = bolus + basal
             bolus_bar = "▓" * min(int(bolus / scale), 20)
-            basal_bar = "░" * min(int(basal / scale), 20)
-            print(f"  {hour:02d}:00   {bolus:4.2f}   {basal:4.2f}   {total:4.2f}  {bolus_bar}{basal_bar}")
+            basal_bar = "░" * min(int(max(basal, 0) / scale), 20)
+            low_flag = "  ← low temp" if basal < 0 else ""
+            print(f"  {hour:02d}:00   {bolus:4.2f}   {basal:5.2f}   {total:4.2f}  {bolus_bar}{basal_bar}{low_flag}")
 
     print()
     print("Note: I'm just a Python script, but honestly I looked at your actual data — which already puts me ahead of most endocrinologists. Use common sense.")

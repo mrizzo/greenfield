@@ -58,18 +58,12 @@ if [[ -n "$TARGET_DATE" ]]; then
 else
     YESTERDAY=$(date -v-1d +%Y-%m-%d)
 fi
-TZ_OFFSET=$(date +%z)  # e.g. +0900
-TZ_HOURS=$(echo "$TZ_OFFSET" | sed 's/+//' | sed 's/-//' | cut -c1-2)
-TZ_SIGN=$(echo "$TZ_OFFSET" | cut -c1)
-if [[ "$TZ_SIGN" == "+" ]]; then
-    UTC_START=$(date -v-${TZ_HOURS}H -jf "%Y-%m-%dT%H:%M:%S" "${YESTERDAY}T00:00:00" +"%Y-%m-%dT%H:%M:%S.000Z")
-    UTC_END=$(date -v-${TZ_HOURS}H -jf "%Y-%m-%dT%H:%M:%S" "${YESTERDAY}T23:59:59" +"%Y-%m-%dT%H:%M:%S.999Z")
-else
-    UTC_START=$(date -v+${TZ_HOURS}H -jf "%Y-%m-%dT%H:%M:%S" "${YESTERDAY}T00:00:00" +"%Y-%m-%dT%H:%M:%S.000Z")
-    UTC_END=$(date -v+${TZ_HOURS}H -jf "%Y-%m-%dT%H:%M:%S" "${YESTERDAY}T23:59:59" +"%Y-%m-%dT%H:%M:%S.999Z")
-fi
-DAY_START="$UTC_START"
-DAY_END="$UTC_END"
+START_EPOCH=$(date -jf "%Y-%m-%d %H:%M:%S" "${YESTERDAY} 00:00:00" +%s)
+END_EPOCH=$(date -jf "%Y-%m-%d %H:%M:%S" "${YESTERDAY} 23:59:59" +%s)
+DAY_START_MS="${START_EPOCH}000"
+DAY_END_MS="${END_EPOCH}999"
+DAY_START_UTC=$(date -ujr "${START_EPOCH}" +"%Y-%m-%dT%H:%M:%S.000Z")
+DAY_END_UTC=$(date -ujr "${END_EPOCH}" +"%Y-%m-%dT%H:%M:%S.999Z")
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -102,12 +96,11 @@ if [[ "${DOWNLOAD_ENTRIES:-1}" == "1" ]]; then
     OUT="$OUTPUT_DIR/${YESTERDAY}_entries.csv"
     echo "Downloading CGM entries for $YESTERDAY..."
 
-    ns_get "/api/v1/entries.json?find[dateString][\$gte]=${DAY_START}&find[dateString][\$lte]=${DAY_END}&count=1440" \
+    ns_get "/api/v1/entries.json?find[date][\$gte]=${DAY_START_MS}&find[date][\$lte]=${DAY_END_MS}&count=1440" \
     | jq -r '
-        ["date","time","sgv_mgdl","direction","noise","device"],
+        ["epoch_ms","sgv_mgdl","direction","noise","device"],
         (.[] | [
-            (.dateString | split("T")[0]),
-            (.dateString | split("T")[1] | split(".")[0]),
+            (.mills // .date | floor),
             (.sgv // ""),
             (.direction // ""),
             (.noise // ""),
@@ -125,12 +118,11 @@ if [[ "${DOWNLOAD_TREATMENTS:-1}" == "1" ]]; then
     OUT="$OUTPUT_DIR/${YESTERDAY}_treatments.csv"
     echo "Downloading treatments for $YESTERDAY..."
 
-    ns_get "/api/v1/treatments.json?find[created_at][\$gte]=${DAY_START}&find[created_at][\$lte]=${DAY_END}&count=1000" \
+    ns_get "/api/v1/treatments.json?find[created_at][\$gte]=${DAY_START_UTC}&find[created_at][\$lte]=${DAY_END_UTC}&count=9999" \
     | jq -r '
-        ["date","time","eventType","insulin","carbs","glucose","glucoseType","units","rate","duration","notes","enteredBy"],
+        ["epoch_ms","eventType","insulin","carbs","glucose","glucoseType","units","rate","duration","notes","enteredBy"],
         (.[] | [
-            (.created_at | split("T")[0]),
-            (.created_at | split("T")[1] | split(".")[0] | split("Z")[0]),
+            (.created_at | split(".")[0] + "Z" | fromdateiso8601 * 1000),
             (.eventType // ""),
             (.insulin // ""),
             (.carbs // ""),
@@ -154,18 +146,8 @@ if [[ "${DOWNLOAD_PROFILE:-1}" == "1" ]]; then
     OUT="$OUTPUT_DIR/${YESTERDAY}_profile.json"
     echo "Downloading profile..."
 
-    # Profile is not time-series; save raw JSON (it rarely changes day-to-day).
-    # Only write if it changed since yesterday's copy.
-    PREV="$OUTPUT_DIR/$(date -v-2d +%Y-%m-%d)_profile.json"
-    ns_get "/api/v1/profile.json" > "${OUT}.tmp"
-
-    if [[ -f "$PREV" ]] && diff -q "$PREV" "${OUT}.tmp" >/dev/null 2>&1; then
-        echo "  -> Profile unchanged since yesterday; skipping duplicate."
-        rm "${OUT}.tmp"
-    else
-        mv "${OUT}.tmp" "$OUT"
-        echo "  -> Profile saved to $OUT"
-    fi
+    ns_get "/api/v1/profile.json" > "$OUT"
+    echo "  -> Profile saved to $OUT"
 fi
 
 echo "Done. Files are in $OUTPUT_DIR"
