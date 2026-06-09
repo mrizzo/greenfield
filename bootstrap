@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+#
+# bootstrap — prepare a fresh nightscout-dl checkout for use.
+#
+# Checks required tooling, creates a config from the example, makes the
+# scripts executable, and prints the next steps. Safe to re-run.
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+bold() { printf '\033[1m%s\033[0m\n' "$1"; }
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
+warn() { printf '  \033[33m!\033[0m %s\n' "$1"; }
+err()  { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
+
+missing=0
+
+# ── Check required tools ───────────────────────────────────────────────────────
+bold "Checking dependencies"
+
+if command -v curl >/dev/null 2>&1; then
+    ok "curl"
+else
+    err "curl not found (required)"
+    missing=1
+fi
+
+if command -v jq >/dev/null 2>&1; then
+    ok "jq"
+else
+    err "jq not found — install with: brew install jq"
+    missing=1
+fi
+
+# analyze.py uses only the stdlib, but needs 3.9+ for zoneinfo.
+if command -v python3 >/dev/null 2>&1; then
+    py_ver="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+    if python3 -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 9) else 1)'; then
+        ok "python3 ($py_ver)"
+    else
+        err "python3 $py_ver found, but analyze.py needs 3.9+ (for zoneinfo)"
+        missing=1
+    fi
+else
+    warn "python3 not found — needed only for analyze.py, not for downloads"
+fi
+
+if [[ "$missing" -ne 0 ]]; then
+    echo
+    err "Missing required tools. Install them and re-run ./bootstrap"
+    exit 1
+fi
+
+# ── Create config ──────────────────────────────────────────────────────────────
+echo
+bold "Config"
+
+if [[ -f config ]]; then
+    ok "config already exists (left untouched)"
+else
+    cp config.example config
+    chmod 600 config
+    ok "created config from config.example"
+    warn "edit config: set NIGHTSCOUT_URL and API_SECRET (or NS_TOKEN)"
+fi
+
+# ── Make scripts executable ─────────────────────────────────────────────────────
+echo
+bold "Permissions"
+chmod +x nightscout-dl.sh install.sh analyze.py
+ok "nightscout-dl.sh, install.sh, analyze.py are executable"
+
+# ── Next steps ──────────────────────────────────────────────────────────────────
+echo
+bold "Next steps"
+cat <<'EOF'
+  1. Edit ./config — set NIGHTSCOUT_URL and API_SECRET (or NS_TOKEN).
+  2. Test a download:    ./nightscout-dl.sh
+  3. Install daily job:  bash install.sh
+  4. Analyze your data:  python3 analyze.py
+EOF
