@@ -150,4 +150,17 @@ if [[ "${DOWNLOAD_PROFILE:-1}" == "1" ]]; then
     echo "  -> Profile saved to $OUT"
 fi
 
+# ── Analysis ─────────────────────────────────────────────────────────────────
+# Run analyze.py for the day we just downloaded. A failure here shouldn't fail
+# the whole run — the downloads are already saved — so warn instead of aborting.
+if [[ "${RUN_ANALYSIS:-1}" == "1" ]]; then
+    echo "Analyzing $YESTERDAY..."
+    if command -v python3 >/dev/null 2>&1; then
+        python3 "$SCRIPT_DIR/analyze.py" "$OUTPUT_DIR" -d "$YESTERDAY" \
+            || echo "WARNING: analysis failed (downloads are still saved)" >&2
+    else
+        echo "WARNING: python3 not found; skipping analysis" >&2
+    fi
+fi
+
 echo "Done. Files are in $OUTPUT_DIR"
