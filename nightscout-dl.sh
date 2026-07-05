@@ -156,8 +156,16 @@ fi
 if [[ "${RUN_ANALYSIS:-1}" == "1" ]]; then
     echo "Analyzing $YESTERDAY..."
     if command -v python3 >/dev/null 2>&1; then
-        python3 "$SCRIPT_DIR/analyze.py" "$OUTPUT_DIR" -d "$YESTERDAY" \
-            || echo "WARNING: analysis failed (downloads are still saved)" >&2
+        ANALYSIS_OUT="$OUTPUT_DIR/${YESTERDAY}_analysis.txt"
+        # tee shows the analysis and saves it. pipefail (set at the top) makes
+        # the pipeline fail if analyze.py fails even though tee succeeds, so a
+        # failed run warns and removes the partial file instead of leaving it.
+        if python3 "$SCRIPT_DIR/analyze.py" "$OUTPUT_DIR" -d "$YESTERDAY" | tee "$ANALYSIS_OUT"; then
+            echo "  -> analysis saved to $ANALYSIS_OUT"
+        else
+            echo "WARNING: analysis failed (downloads are still saved)" >&2
+            rm -f "$ANALYSIS_OUT"
+        fi
     else
         echo "WARNING: python3 not found; skipping analysis" >&2
     fi
