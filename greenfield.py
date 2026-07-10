@@ -93,6 +93,18 @@ TOOLS = [
         },
     },
     {
+        "name": "get_hourly_bg",
+        "description": "Average CGM by hour of day over the window. Works on "
+                       "closed-loop data where fasting-drift/observed-ISF are "
+                       "empty; a block that runs persistently high or low is a "
+                       "candidate for a basal/ISF change there.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"days": {"type": "integer"}},
+            "required": ["days"],
+        },
+    },
+    {
         "name": "get_current_settings",
         "description": "Current basal / ISF / carb-ratio profile, read from the "
                        "latest downloaded Nightscout profile. Read-only.",
@@ -198,6 +210,7 @@ def main():
         "find_cgm_gaps": lambda i: gt.find_cgm_gaps(i["days"]),
         "get_fasting_drift": lambda i: gt.get_fasting_drift(i["days"]),
         "get_observed_isf": lambda i: gt.get_observed_isf(i["days"]),
+        "get_hourly_bg": lambda i: gt.get_hourly_bg(i["days"]),
         "get_current_settings": lambda i: gt.get_current_settings(),
     }
 

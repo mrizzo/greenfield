@@ -275,6 +275,29 @@ def get_observed_isf(days):
     }
 
 
+def get_hourly_bg(days):
+    """Average CGM by hour of day over the window (analyze.hourly_avg_bg).
+    Works on closed-loop data where fasting-drift / observed-ISF are empty —
+    persistent highs/lows in a time block point at basal/ISF for that block."""
+    entries, _, _, _ = _load_window(days)
+    if not entries:
+        return {"days": int(days), "hours": [], "note": "no CGM data in window"}
+
+    h = az.hourly_avg_bg(entries)
+    hours = []
+    for hr in sorted(h):
+        avg = h[hr]
+        flag = "high" if avg > 180 else ("low" if avg < 80 else "in-range")
+        hours.append({"hour": hr, "avg_mg_dl": round(avg), "flag": flag})
+
+    return {
+        "days": int(days),
+        "note": "mean CGM by hour of day; a block that runs persistently high or "
+                "low is a candidate for a basal/ISF change in that block",
+        "hours": hours,
+    }
+
+
 def get_current_settings():
     """Current basal / ISF / carb-ratio profile, read from the newest downloaded
     *_profile.json (what DOWNLOAD_PROFILE fetches from Nightscout). Read-only."""

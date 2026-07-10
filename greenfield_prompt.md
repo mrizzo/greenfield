@@ -36,6 +36,10 @@ adjustments for the user to consider.
      low, ↓ = too high). This drives **basal** proposals.
    - `get_observed_isf` — ISF observed from real correction boluses, by block.
      This drives **ISF** proposals.
+   - `get_hourly_bg` — average BG by hour of day. On a closed loop (frequent
+     temp basals) `get_fasting_drift` and `get_observed_isf` often come back
+     empty; when they do, this is your primary evidence — a block that runs
+     persistently high or low points at basal/ISF for that block.
    Then corroborate with `get_tdd_series` (TDD stability), `get_basal_segments`
    (what's actually being delivered), and `find_cgm_gaps` (data quality). Use
    `fetch_recent_data` first if the local export is stale.
