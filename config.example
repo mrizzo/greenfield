@@ -13,3 +13,7 @@ DOWNLOAD_PROFILE=1      # Basal rates, ISF, carb ratios
 # Time launchd will run the script each day (24h, local time)
 RUN_HOUR=6
 RUN_MINUTE=0
+
+# Greenfield agent (greenfield.py) — Claude API key. Never commit the real key;
+# keep it in your local `config` (gitignored). Exported so greenfield.py sees it:
+export ANTHROPIC_API_KEY="sk-ant-..."

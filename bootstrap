@@ -47,6 +47,16 @@ else
     warn "python3 not found — needed only for analyze.py, not for downloads"
 fi
 
+# greenfield.py (the Claude agent) needs the anthropic package. Optional — the
+# downloader and analyze.py don't use it, so this only warns.
+if command -v python3 >/dev/null 2>&1; then
+    if python3 -c 'import anthropic' >/dev/null 2>&1; then
+        ok "anthropic (for greenfield.py)"
+    else
+        warn "anthropic not installed — needed only for greenfield.py: pip3 install anthropic"
+    fi
+fi
+
 if [[ "$missing" -ne 0 ]]; then
     echo
     err "Missing required tools. Install them and re-run ./bootstrap"
@@ -69,8 +79,8 @@ fi
 # ── Make scripts executable ─────────────────────────────────────────────────────
 echo
 bold "Permissions"
-chmod +x nightscout-dl.sh install.sh analyze.py
-ok "nightscout-dl.sh, install.sh, analyze.py are executable"
+chmod +x nightscout-dl.sh install.sh analyze.py greenfield.py
+ok "nightscout-dl.sh, install.sh, analyze.py, greenfield.py are executable"
 
 # ── Next steps ──────────────────────────────────────────────────────────────────
 echo
@@ -80,4 +90,5 @@ cat <<'EOF'
   2. Test a download:    ./nightscout-dl.sh
   3. Install daily job:  bash install.sh
   4. Analyze your data:  python3 analyze.py
+  5. Propose changes:    python3 greenfield.py   (needs ANTHROPIC_API_KEY + anthropic)
 EOF
