@@ -27,7 +27,13 @@ Reads the exported files and produces three analyses Nightscout has no equivalen
 ### `greenfield.py` — Claude-powered proposals
 A read-only agent that reviews recent data (reusing the loaders and analyses above) and **proposes** basal/ISF adjustments with citations to the specific data behind each number. It never applies changes — you decide. Guardrails are enforced in code: it refuses with <10 days of data or >20% CGM gaps, rejects proposed numbers with no data citation or >15% changes that aren't justified, and logs every run (including refusals) to `proposals.jsonl` (gitignored). Not medical advice.
 
-Needs the `anthropic` package (`pip3 install anthropic`) and an `ANTHROPIC_API_KEY`. greenfield reads the key from the **environment** — it does not source `config` itself — so keep it in `config` as an `export`ed line and `source config` before running (see the alias below), or just `export` it in your shell.
+Needs the `anthropic` package and an `ANTHROPIC_API_KEY`. On Homebrew Python (PEP 668 blocks global `pip install`), install into a venv:
+
+```sh
+python3 -m venv .venv && .venv/bin/pip install anthropic
+```
+
+greenfield reads the key from the **environment** — it does not source `config` itself — so keep it in `config` as an `export`ed line and `source config` before running (see the alias below), or just `export` it in your shell.
 
 ## Setup
 
@@ -57,8 +63,8 @@ python3 analyze.py -n 30
 # Analyze a single day
 python3 analyze.py -d 2026-05-20
 
-# Propose basal/ISF changes for the last 14 days (needs ANTHROPIC_API_KEY + anthropic)
-source config && python3 greenfield.py 14
+# Propose basal/ISF changes for the last 14 days (needs ANTHROPIC_API_KEY + anthropic venv)
+source config && .venv/bin/python greenfield.py 14
 ```
 
 Output goes to `~/nightscout-exports/` by default (configurable in `config`).
@@ -66,6 +72,6 @@ Output goes to `~/nightscout-exports/` by default (configurable in `config`).
 ### Handy alias
 
 ```sh
-# ~/.zshrc — sources config so ANTHROPIC_API_KEY is in the environment
-alias greenfield='cd /Users/mrizzo/code/nightscout-dl && source config && python3 greenfield.py'
+# ~/.zshrc — sources config (for ANTHROPIC_API_KEY) and uses the venv python
+alias greenfield='cd /Users/mrizzo/code/nightscout-dl && source config && .venv/bin/python greenfield.py'
 ```
