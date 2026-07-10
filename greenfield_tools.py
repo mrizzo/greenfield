@@ -218,6 +218,63 @@ def find_cgm_gaps(days):
     }
 
 
+def _block_label(block):
+    return f"{block:02d}:00-{block + 2:02d}:00"
+
+
+def get_fasting_drift(days):
+    """BG drift by 2-hour block during fasting periods (no insulin/carbs in the
+    prior 4h). Positive = BG rising = basal likely too low; negative = too high.
+    Reuses analyze.fasting_bg_trends — the primary basal-adjustment signal."""
+    entries, treatments, _, _ = _load_window(days)
+    if not entries:
+        return {"days": int(days), "blocks": [], "note": "no CGM data in window"}
+
+    trends = az.fasting_bg_trends(entries, treatments)  # {block:int -> mg/dL/hr}
+    blocks = []
+    for b in sorted(trends):
+        rate = trends[b]
+        if rate > 3:
+            direction = "rising (basal likely too low)"
+        elif rate < -3:
+            direction = "falling (basal likely too high)"
+        else:
+            direction = "stable"
+        blocks.append({"time_block": _block_label(b),
+                       "mg_dl_per_hr": round(rate, 1), "direction": direction})
+
+    return {
+        "days": int(days),
+        "note": "fasting periods only (>=10 samples per block); positive = need "
+                "more basal, negative = need less",
+        "blocks": blocks,
+    }
+
+
+def get_observed_isf(days):
+    """Empirically observed ISF by 2-hour block, from real correction boluses
+    with no carbs within ±2h. Reuses analyze.empirical_isf — the primary
+    ISF-adjustment signal."""
+    entries, treatments, _, _ = _load_window(days)
+    if not entries:
+        return {"days": int(days), "by_block": [], "overall_isf": None,
+                "note": "no CGM data in window"}
+
+    (overall_isf, n_overall), by_block = az.empirical_isf(entries, treatments)
+    blocks = [
+        {"time_block": _block_label(b), "isf_mg_dl_per_u": round(v), "n": n}
+        for b, (v, n) in sorted(by_block.items()) if n >= 2
+    ]
+    return {
+        "days": int(days),
+        "overall_isf": round(overall_isf) if overall_isf else None,
+        "overall_n": n_overall,
+        "by_block": blocks,
+        "note": "observed ISF = (BG at correction - nadir over next 3h) / units; "
+                "higher n = more confidence",
+    }
+
+
 def get_current_settings():
     """Current basal / ISF / carb-ratio profile, read from the newest downloaded
     *_profile.json (what DOWNLOAD_PROFILE fetches from Nightscout). Read-only."""

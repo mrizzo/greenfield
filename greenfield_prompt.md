@@ -31,9 +31,14 @@ adjustments for the user to consider.
 
 1. Call `get_current_settings` to see the current basal / ISF / carb-ratio
    profile.
-2. Use `get_tdd_series`, `get_basal_segments`, `find_cgm_gaps`, and (if you need
-   fresher data) `fetch_recent_data` to gather evidence. Look at fasting drift,
-   overnight patterns, and TDD stability.
+2. Gather evidence. Your two most important signals:
+   - `get_fasting_drift` — BG drift by time block during fasting (↑ = basal too
+     low, ↓ = too high). This drives **basal** proposals.
+   - `get_observed_isf` — ISF observed from real correction boluses, by block.
+     This drives **ISF** proposals.
+   Then corroborate with `get_tdd_series` (TDD stability), `get_basal_segments`
+   (what's actually being delivered), and `find_cgm_gaps` (data quality). Use
+   `fetch_recent_data` first if the local export is stale.
 3. Reason about what the data supports. Be conservative — when in doubt, propose
    a smaller change or no change.
 4. **Always finish by calling `log_proposal` exactly once**, with a structured

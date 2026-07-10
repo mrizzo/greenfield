@@ -71,6 +71,28 @@ TOOLS = [
         },
     },
     {
+        "name": "get_fasting_drift",
+        "description": "BG drift by 2-hour block during fasting periods. Positive "
+                       "= BG rising = basal likely too low; negative = too high. "
+                       "The primary signal for basal adjustments.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"days": {"type": "integer"}},
+            "required": ["days"],
+        },
+    },
+    {
+        "name": "get_observed_isf",
+        "description": "Empirically observed ISF by 2-hour block, from real "
+                       "correction boluses (no carbs within ±2h). The primary "
+                       "signal for ISF adjustments.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"days": {"type": "integer"}},
+            "required": ["days"],
+        },
+    },
+    {
         "name": "get_current_settings",
         "description": "Current basal / ISF / carb-ratio profile, read from the "
                        "latest downloaded Nightscout profile. Read-only.",
@@ -174,6 +196,8 @@ def main():
         "get_tdd_series": lambda i: gt.get_tdd_series(i["days"]),
         "get_basal_segments": lambda i: gt.get_basal_segments(i["date"]),
         "find_cgm_gaps": lambda i: gt.find_cgm_gaps(i["days"]),
+        "get_fasting_drift": lambda i: gt.get_fasting_drift(i["days"]),
+        "get_observed_isf": lambda i: gt.get_observed_isf(i["days"]),
         "get_current_settings": lambda i: gt.get_current_settings(),
     }
 
