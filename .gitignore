@@ -9,6 +9,7 @@
 # Python
 __pycache__/
 *.py[cod]
+.venv/
 
 # Local configs and sensitive
 webscr-config

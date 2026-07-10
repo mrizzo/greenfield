@@ -21,7 +21,7 @@ import greenfield_tools as gt
 
 MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 8000
-MAX_ITERATIONS = 16  # safety cap on the tool-use loop
+MAX_ITERATIONS = 30  # safety cap on the tool-use loop
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ── Tool schemas exposed to Claude ───────────────────────────────────────────
@@ -217,7 +217,7 @@ def main():
     logged_ok = False
     last_attempt = None  # (proposal, validation) of the most recent submission
 
-    for _ in range(MAX_ITERATIONS):
+    for it in range(MAX_ITERATIONS):
         response = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
@@ -227,6 +227,9 @@ def main():
             messages=messages,
         )
         messages.append({"role": "assistant", "content": response.content})
+        called = [b.name for b in response.content if b.type == "tool_use"]
+        print(f"[iter {it + 1}/{MAX_ITERATIONS}] stop={response.stop_reason} "
+              f"tools={called}", file=sys.stderr)
 
         if response.stop_reason == "refusal":
             print("Claude refused this request.")

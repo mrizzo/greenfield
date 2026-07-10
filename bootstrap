@@ -50,10 +50,12 @@ fi
 # greenfield.py (the Claude agent) needs the anthropic package. Optional — the
 # downloader and analyze.py don't use it, so this only warns.
 if command -v python3 >/dev/null 2>&1; then
-    if python3 -c 'import anthropic' >/dev/null 2>&1; then
-        ok "anthropic (for greenfield.py)"
+    gf_py="python3"; [ -x .venv/bin/python ] && gf_py=".venv/bin/python"
+    if "$gf_py" -c 'import anthropic' >/dev/null 2>&1; then
+        ok "anthropic ($gf_py, for greenfield.py)"
     else
-        warn "anthropic not installed — needed only for greenfield.py: pip3 install anthropic"
+        warn "anthropic not installed — for greenfield.py, install into a venv:"
+        warn "  python3 -m venv .venv && .venv/bin/pip install anthropic"
     fi
 fi
 
