@@ -218,11 +218,14 @@ def main():
     last_attempt = None  # (proposal, validation) of the most recent submission
 
     for it in range(MAX_ITERATIONS):
+        # No extended thinking: it fired on every iteration (each turn paid a
+        # full reasoning pass before even emitting a tool call), which dominated
+        # wall-clock time. Sonnet 4.6 selects among these read-only tools well
+        # without it, and proposal quality held up in testing.
         response = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
             system=system_prompt,
-            thinking={"type": "adaptive"},
             tools=TOOLS,
             messages=messages,
         )
