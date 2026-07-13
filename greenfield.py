@@ -302,6 +302,9 @@ def main():
     print("\n" + "=" * 70)
     print(_text(response) or "(no final text)")
     print("=" * 70)
+    print("Note: I'm just a Python script, but honestly I looked at your actual "
+          "data — which already puts me ahead of most endocrinologists. Use "
+          "common sense.")
     print(f"Proposal logged to {gt.PROPOSALS_LOG}")
 
 
