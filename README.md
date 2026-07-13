@@ -1,8 +1,14 @@
-# nightscout-dl
+# greenfield
 
-Downloads your Nightscout CGM data locally and empirically tunes ISF & basal rates from your own correction history.
+Downloads your Nightscout CGM data locally, empirically tunes ISF & basal rates from your own correction history, and — via the Greenfield agent — proposes adjustments with citations back to your own data.
 
 Nightscout shows you your data. This tool tells you whether your **settings** are wrong — ISF, basal rates — derived from what actually happened in your own data, not population averages.
+
+## Why "greenfield"
+
+Named after **Dr. Michael Greenfield** — my endocrinologist of 14 years, who is himself Type 1 diabetic. The bar for the agent is his bar: *he wouldn't propose something he wouldn't do for himself.* So the `greenfield.py` agent only **proposes** (never applies), grounds every number in your own data, prefers small changes or none at all, and always leaves the decision to you.
+
+(The repo grew out of a simple downloader — the `nightscout-dl.sh` script keeps that name; the repo is named for what it became.)
 
 ## What it does
 
