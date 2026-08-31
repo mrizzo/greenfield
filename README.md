@@ -71,6 +71,12 @@ python3 analyze.py -d 2026-05-20
 
 # Propose basal/ISF changes for the last 14 days (needs ANTHROPIC_API_KEY + anthropic venv)
 source config && .venv/bin/python greenfield.py 14
+
+# Reprint the last run's output offline — no API key, no new API call
+.venv/bin/python greenfield.py --last
+
+# Run and also save the output to a file of your choice
+source config && .venv/bin/python greenfield.py 14 --export report.txt
 ```
 
 Output goes to `~/nightscout-exports/` by default (configurable in `config`).

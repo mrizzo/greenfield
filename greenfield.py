@@ -154,13 +154,31 @@ def _text(response):
     return "".join(b.text for b in response.content if b.type == "text").strip()
 
 
+# Full text of the most recent run, saved so the output can be re-read offline
+# (no API key, no re-billing). Local-only — may contain derived medical data.
+LAST_RUN_TXT = os.path.join(SCRIPT_DIR, "last_run.txt")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Propose basal/ISF adjustments from recent Nightscout data")
     parser.add_argument("days", nargs="?", type=int, default=14,
                         help="Window size in days (default: 14)")
+    parser.add_argument("--last", action="store_true",
+                        help="Reprint the last run's output from disk and exit "
+                             "(no API key required, no new API call)")
+    parser.add_argument("--export", metavar="PATH",
+                        help="Also write this run's output to PATH")
     args = parser.parse_args()
     days = args.days
+
+    # Offline replay: reprint the saved output without touching the API.
+    if args.last:
+        if not os.path.exists(LAST_RUN_TXT):
+            sys.exit(f"No saved output at {LAST_RUN_TXT}. Run greenfield once first.")
+        with open(LAST_RUN_TXT) as fh:
+            sys.stdout.write(fh.read())
+        return
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("ERROR: set ANTHROPIC_API_KEY in your environment "
@@ -299,13 +317,25 @@ def main():
                 meta={"window_days": days, "model": MODEL},
             )
 
-    print("\n" + "=" * 70)
-    print(_text(response) or "(no final text)")
-    print("=" * 70)
-    print("Note: I'm just a Python script, but honestly I looked at your actual "
-          "data — which already puts me ahead of most endocrinologists. Use "
-          "common sense.")
-    print(f"Proposal logged to {gt.PROPOSALS_LOG}")
+    output = "\n".join([
+        "\n" + "=" * 70,
+        _text(response) or "(no final text)",
+        "=" * 70,
+        "Note: I'm just a Python script, but honestly I looked at your actual "
+        "data — which already puts me ahead of most endocrinologists. Use "
+        "common sense.",
+        f"Proposal logged to {gt.PROPOSALS_LOG}",
+    ]) + "\n"
+
+    print(output, end="")
+
+    # Persist the output so it can be re-read offline via --last (no API call).
+    with open(LAST_RUN_TXT, "w") as fh:
+        fh.write(output)
+    if args.export:
+        with open(args.export, "w") as fh:
+            fh.write(output)
+        print(f"Output written to {args.export}")
 
 
 if __name__ == "__main__":

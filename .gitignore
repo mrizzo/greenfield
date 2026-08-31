@@ -21,8 +21,9 @@ webscr-config
 *_profile.json
 *_analysis.txt
 
-# Greenfield proposal log (contains derived medical data — keep local)
+# Greenfield proposal log + saved run output (derived medical data — keep local)
 proposals.jsonl
+last_run.txt
 
 # Logs
 *.log
