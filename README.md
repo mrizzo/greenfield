@@ -31,7 +31,7 @@ Reads the exported files and produces three analyses Nightscout has no equivalen
 **Bolus vs. basal breakdown** — reconstructs scheduled basal delivery from your profile, accounts for every temp basal override, and gives you accurate bolus/basal split and total daily dose.
 
 ### `greenfield.py` — Claude-powered proposals
-A read-only agent that reviews recent data (reusing the loaders and analyses above) and **proposes** basal/ISF adjustments with citations to the specific data behind each number. It never applies changes — you decide. Guardrails are enforced in code: it refuses with <10 days of data or >20% CGM gaps, rejects proposed numbers with no data citation or >15% changes that aren't justified, and logs every run (including refusals) to `proposals.jsonl` (gitignored). Not medical advice.
+A read-only agent that reviews recent data (reusing the loaders and analyses above) and **proposes** basal/ISF adjustments with citations to the specific data behind each number. It never applies changes — you decide. Guardrails are enforced in code: it refuses with <7 days of data or >20% CGM gaps, rejects proposed numbers with no data citation or >15% changes that aren't justified, and logs every run (including refusals) to `proposals.jsonl` (gitignored). Not medical advice.
 
 Needs the `anthropic` package and an `ANTHROPIC_API_KEY`. On Homebrew Python (PEP 668 blocks global `pip install`), install into a venv:
 
