@@ -133,15 +133,24 @@ def fetch_recent_data(days):
     return {"requested_days": int(days), "output_dir": OUTPUT_DIR, "downloaded": results}
 
 
-def get_tdd_series(days):
+def get_tdd_series(days, trim=False):
     """Per-day total daily dose plus the trailing median over the window.
-    Reuses analyze.tdd_stats (the median-TDD calculation)."""
+    Reuses analyze.tdd_stats (the median-TDD calculation).
+
+    trim=True computes a *trimmed* trailing median for the Rule-of-1800 anchor:
+    the single highest- and single lowest-TDD days are dropped before taking
+    the median, so one heavy-meal day (high outlier) or one fasting day (low
+    outlier) can't skew the ISF/carb sanity floors. Only this anchor is
+    affected — every day's fasting/no-carb windows still feed the empirical
+    ISF and basal-drift analyses. Needs >= 3 days; falls back to untrimmed
+    below that (nothing left to take a median of)."""
     _, treatments, _, _ = _load_window(days)
     if not treatments:
         return {"days": [], "trailing_median_tdd": None,
                 "note": "no treatment data in window"}
 
     per_day = []
+    raw_totals = []  # (date, unrounded TDD) — precise input for a trimmed median
     for d in sorted({t["dt"].date() for t in treatments}):
         day_tx = [t for t in treatments if t["dt"].date() == d]
         s = az.tdd_stats(day_tx)  # single day -> that day's totals
@@ -152,13 +161,32 @@ def get_tdd_series(days):
                 "bolus": round(s["bolus"], 1),
                 "basal": round(s["total_basal"], 1),
             })
+            raw_totals.append((d.isoformat(), s["median_tdd"]))
 
     trailing = az.tdd_stats(treatments)  # median across the window
-    return {
+    result = {
         "days": per_day,
         "trailing_median_tdd": round(trailing["median_tdd"], 1) if trailing else None,
         "tdd_range": [round(x, 1) for x in trailing["tdd_range"]] if trailing else None,
+        "trimmed": False,
     }
+
+    if trim and len(raw_totals) >= 3:
+        ordered = sorted(raw_totals, key=lambda x: x[1])
+        low, high = ordered[0], ordered[-1]
+        kept = [v for _, v in ordered[1:-1]]
+        result["untrimmed_median_tdd"] = result["trailing_median_tdd"]
+        result["trailing_median_tdd"] = round(statistics.median(kept), 1)
+        result["trimmed"] = True
+        # Recorded so the model can cite exactly which days were set aside.
+        result["trimmed_out"] = [
+            {"date": low[0], "tdd": round(low[1], 1), "which": "lowest"},
+            {"date": high[0], "tdd": round(high[1], 1), "which": "highest"},
+        ]
+    elif trim:
+        result["trim_note"] = "need >= 3 days to trim; used untrimmed median"
+
+    return result
 
 
 def get_basal_segments(target_date):

@@ -72,6 +72,10 @@ python3 analyze.py -d 2026-05-20
 # Propose basal/ISF changes for the last 14 days (needs ANTHROPIC_API_KEY + anthropic venv)
 source config && .venv/bin/python greenfield.py 14
 
+# Trim the highest- and lowest-TDD day from the Rule-of-1800 anchor
+# (one heavy-meal or fasting day won't skew the ISF/carb sanity checks)
+source config && .venv/bin/python greenfield.py 7 --trim-tdd
+
 # Reprint the last run's output offline — no API key, no new API call
 .venv/bin/python greenfield.py --last
 
