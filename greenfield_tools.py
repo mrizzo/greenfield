@@ -27,7 +27,7 @@ OUTPUT_DIR = os.path.expanduser(
 )
 
 # ── Guardrail constants (enforced in code, not in the prompt) ────────────────
-MIN_DAYS = 10               # refuse with fewer than this many days of data
+MIN_DAYS = 7                # refuse with fewer than this many days of data
 MAX_GAP_FRACTION = 0.20     # refuse if >20% of expected CGM readings are missing
 MAX_CHANGE_FRACTION = 0.15  # >15% change must be marked large + justified
 ISF_RULE = 1800             # Rule of 1800 (mg/dL): ISF ≈ 1800 / TDD
