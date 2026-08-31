@@ -169,6 +169,11 @@ def main():
                              "(no API key required, no new API call)")
     parser.add_argument("--export", metavar="PATH",
                         help="Also write this run's output to PATH")
+    parser.add_argument("--trim-tdd", action="store_true",
+                        help="Trim the single highest- and lowest-TDD day from "
+                             "the Rule-of-1800 TDD anchor, so one heavy-meal or "
+                             "fasting day can't skew the ISF/carb sanity checks. "
+                             "Per-day fasting analyses are unaffected.")
     args = parser.parse_args()
     days = args.days
 
@@ -202,7 +207,7 @@ def main():
 
     # Values the code-side validator needs.
     current_settings = gt.get_current_settings()
-    tdd_series = gt.get_tdd_series(days)
+    tdd_series = gt.get_tdd_series(days, trim=args.trim_tdd)
     trailing_tdd = tdd_series.get("trailing_median_tdd")
 
     system_prompt = open(os.path.join(SCRIPT_DIR, "greenfield_prompt.md")).read()
@@ -223,7 +228,7 @@ def main():
     # Handlers that take the tool input dict and return a JSON-serializable result.
     dispatch = {
         "fetch_recent_data": lambda i: gt.fetch_recent_data(i["days"]),
-        "get_tdd_series": lambda i: gt.get_tdd_series(i["days"]),
+        "get_tdd_series": lambda i: gt.get_tdd_series(i["days"], trim=args.trim_tdd),
         "get_basal_segments": lambda i: gt.get_basal_segments(i["date"]),
         "find_cgm_gaps": lambda i: gt.find_cgm_gaps(i["days"]),
         "get_fasting_drift": lambda i: gt.get_fasting_drift(i["days"]),
@@ -270,7 +275,8 @@ def main():
                     gt.log_proposal(
                         proposal, validation=validation,
                         meta={"window_days": days, "model": MODEL,
-                              "trailing_median_tdd": trailing_tdd},
+                              "trailing_median_tdd": trailing_tdd,
+                              "trim_tdd": args.trim_tdd},
                     )
                     logged_ok = True
                     result = {"logged": True, "flags": validation["flags"]}
