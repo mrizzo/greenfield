@@ -84,8 +84,13 @@ source config && .venv/bin/python greenfield.py 14 --export report.txt
 ```
 
 Output goes to `~/nightscout-exports/` by default (configurable in `config`).
-Each run also archives its full text there as
-`YYYYMMDD_HHMMSS_greenfield_proposal.txt`; `--last` reprints the most recent one.
+Each run archives itself there as `YYYYMMDD_HHMMSS_greenfield_proposal.{json,txt}`
+— the `.json` is the record of truth (narrative text + structured proposal +
+validation + meta) and the `.txt` is a pure render of it. `--last` rebuilds the
+most recent run's text from its `.json`, so the exact output is reproducible
+offline with no API key and no new API call. (Re-running the agent is *not*
+reproducible — LLM output is non-deterministic — which is why the result is
+saved rather than regenerated.)
 
 ### Handy alias
 

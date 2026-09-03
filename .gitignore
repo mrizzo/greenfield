@@ -24,6 +24,7 @@ webscr-config
 # Greenfield proposal log + saved run output (derived medical data — keep local)
 proposals.jsonl
 *_greenfield_proposal.txt
+*_greenfield_proposal.json
 
 # Logs
 *.log
