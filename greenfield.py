@@ -11,9 +11,11 @@ are enforced in this file and greenfield_tools.py — not left to the prompt.
 """
 
 import argparse
+import glob
 import json
 import os
 import sys
+from datetime import datetime
 
 import anthropic
 
@@ -154,9 +156,43 @@ def _text(response):
     return "".join(b.text for b in response.content if b.type == "text").strip()
 
 
-# Full text of the most recent run, saved so the output can be re-read offline
-# (no API key, no re-billing). Local-only — may contain derived medical data.
-LAST_RUN_TXT = os.path.join(SCRIPT_DIR, "last_run.txt")
+# Each run is archived to the exports dir (alongside the CGM exports) as
+# YYYYMMDD_HHMMSS_greenfield_proposal.{json,txt}. The .json is the record of
+# truth; the .txt is a pure render of it, so the exact same text can be
+# reproduced offline (no API key, no RPC) from the .json — fully idempotent.
+# The model call itself is NOT reproducible (LLM output is non-deterministic
+# and depends on live data), but rendering a saved result always is.
+# Local-only — derived medical data.
+PROPOSAL_STEM = "_greenfield_proposal"
+BANNER = "=" * 70
+NOTE = ("Note: I'm just a Python script, but honestly I looked at your actual "
+        "data — which already puts me ahead of most endocrinologists. Use "
+        "common sense.")
+
+
+def _new_proposal_base():
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return os.path.join(gt.OUTPUT_DIR, f"{ts}{PROPOSAL_STEM}")
+
+
+def _latest_proposal(ext):
+    """Most recent saved proposal file with the given extension (json/txt).
+    Timestamped names sort chronologically."""
+    matches = sorted(glob.glob(os.path.join(gt.OUTPUT_DIR, f"*{PROPOSAL_STEM}.{ext}")))
+    return matches[-1] if matches else None
+
+
+def render_output(record):
+    """Rebuild a run's text from its saved JSON record. Pure function of the
+    record + module constants — no API call, so a given record always yields
+    byte-identical text."""
+    return "\n".join([
+        "\n" + BANNER,
+        record.get("final_text") or "(no final text)",
+        BANNER,
+        NOTE,
+        f"Proposal logged to {gt.PROPOSALS_LOG}",
+    ]) + "\n"
 
 
 def main():
@@ -177,13 +213,20 @@ def main():
     args = parser.parse_args()
     days = args.days
 
-    # Offline replay: reprint the saved output without touching the API.
+    # Offline replay: rebuild the most recent run's text from its JSON record
+    # (or fall back to a legacy .txt). No API call — deterministic.
     if args.last:
-        if not os.path.exists(LAST_RUN_TXT):
-            sys.exit(f"No saved output at {LAST_RUN_TXT}. Run greenfield once first.")
-        with open(LAST_RUN_TXT) as fh:
-            sys.stdout.write(fh.read())
-        return
+        jpath = _latest_proposal("json")
+        if jpath:
+            with open(jpath) as fh:
+                sys.stdout.write(render_output(json.load(fh)))
+            return
+        tpath = _latest_proposal("txt")
+        if tpath:
+            with open(tpath) as fh:
+                sys.stdout.write(fh.read())
+            return
+        sys.exit(f"No saved proposal in {gt.OUTPUT_DIR}. Run greenfield once first.")
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("ERROR: set ANTHROPIC_API_KEY in your environment "
@@ -323,21 +366,31 @@ def main():
                 meta={"window_days": days, "model": MODEL},
             )
 
-    output = "\n".join([
-        "\n" + "=" * 70,
-        _text(response) or "(no final text)",
-        "=" * 70,
-        "Note: I'm just a Python script, but honestly I looked at your actual "
-        "data — which already puts me ahead of most endocrinologists. Use "
-        "common sense.",
-        f"Proposal logged to {gt.PROPOSALS_LOG}",
-    ]) + "\n"
-
+    # The JSON record is the source of truth; the printed/saved text is a pure
+    # render of it (render_output), so --last reproduces this exact text with
+    # no API call.
+    record = {
+        "schema": 1,
+        "timestamp": datetime.now().isoformat(),
+        "window_days": days,
+        "model": MODEL,
+        "trim_tdd": args.trim_tdd,
+        "trailing_median_tdd": trailing_tdd,
+        "final_text": _text(response),
+        "proposal": last_attempt[0] if last_attempt else None,
+        "validation": last_attempt[1] if last_attempt else None,
+    }
+    output = render_output(record)
     print(output, end="")
 
-    # Persist the output so it can be re-read offline via --last (no API call).
-    with open(LAST_RUN_TXT, "w") as fh:
+    # Archive both the record and its render to the exports dir.
+    os.makedirs(gt.OUTPUT_DIR, exist_ok=True)
+    base = _new_proposal_base()
+    with open(base + ".json", "w") as fh:
+        json.dump(record, fh, indent=2, default=str)
+    with open(base + ".txt", "w") as fh:
         fh.write(output)
+    print(f"Output saved to {base}.txt (+ .json)")
     if args.export:
         with open(args.export, "w") as fh:
             fh.write(output)
