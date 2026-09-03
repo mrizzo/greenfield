@@ -11,9 +11,11 @@ are enforced in this file and greenfield_tools.py — not left to the prompt.
 """
 
 import argparse
+import glob
 import json
 import os
 import sys
+from datetime import datetime
 
 import anthropic
 
@@ -154,9 +156,21 @@ def _text(response):
     return "".join(b.text for b in response.content if b.type == "text").strip()
 
 
-# Full text of the most recent run, saved so the output can be re-read offline
-# (no API key, no re-billing). Local-only — may contain derived medical data.
-LAST_RUN_TXT = os.path.join(SCRIPT_DIR, "last_run.txt")
+# Each run's full output is archived to the exports dir (alongside the CGM
+# exports) as YYYYMMDD_HHMMSS_greenfield_proposal.txt, so runs can be re-read
+# offline (no API key, no re-billing). Local-only — derived medical data.
+PROPOSAL_GLOB = "*_greenfield_proposal.txt"
+
+
+def _new_proposal_path():
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return os.path.join(gt.OUTPUT_DIR, f"{ts}_greenfield_proposal.txt")
+
+
+def _latest_proposal_path():
+    """Most recent saved proposal (timestamped names sort chronologically)."""
+    matches = sorted(glob.glob(os.path.join(gt.OUTPUT_DIR, PROPOSAL_GLOB)))
+    return matches[-1] if matches else None
 
 
 def main():
@@ -177,11 +191,12 @@ def main():
     args = parser.parse_args()
     days = args.days
 
-    # Offline replay: reprint the saved output without touching the API.
+    # Offline replay: reprint the most recent saved proposal, no API call.
     if args.last:
-        if not os.path.exists(LAST_RUN_TXT):
-            sys.exit(f"No saved output at {LAST_RUN_TXT}. Run greenfield once first.")
-        with open(LAST_RUN_TXT) as fh:
+        path = _latest_proposal_path()
+        if not path:
+            sys.exit(f"No saved proposal in {gt.OUTPUT_DIR}. Run greenfield once first.")
+        with open(path) as fh:
             sys.stdout.write(fh.read())
         return
 
@@ -335,9 +350,13 @@ def main():
 
     print(output, end="")
 
-    # Persist the output so it can be re-read offline via --last (no API call).
-    with open(LAST_RUN_TXT, "w") as fh:
+    # Archive the output to the exports dir so runs can be re-read offline
+    # via --last (no API call).
+    os.makedirs(gt.OUTPUT_DIR, exist_ok=True)
+    saved = _new_proposal_path()
+    with open(saved, "w") as fh:
         fh.write(output)
+    print(f"Output saved to {saved}")
     if args.export:
         with open(args.export, "w") as fh:
             fh.write(output)

@@ -76,7 +76,7 @@ source config && .venv/bin/python greenfield.py 14
 # (one heavy-meal or fasting day won't skew the ISF/carb sanity checks)
 source config && .venv/bin/python greenfield.py 7 --trim-tdd
 
-# Reprint the last run's output offline — no API key, no new API call
+# Reprint the most recent saved proposal offline — no API key, no new API call
 .venv/bin/python greenfield.py --last
 
 # Run and also save the output to a file of your choice
@@ -84,6 +84,8 @@ source config && .venv/bin/python greenfield.py 14 --export report.txt
 ```
 
 Output goes to `~/nightscout-exports/` by default (configurable in `config`).
+Each run also archives its full text there as
+`YYYYMMDD_HHMMSS_greenfield_proposal.txt`; `--last` reprints the most recent one.
 
 ### Handy alias
 
