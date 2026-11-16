@@ -66,6 +66,9 @@ DAY_START_UTC=$(date -ujr "${START_EPOCH}" +"%Y-%m-%dT%H:%M:%S.000Z")
 DAY_END_UTC=$(date -ujr "${END_EPOCH}" +"%Y-%m-%dT%H:%M:%S.999Z")
 
 mkdir -p "$OUTPUT_DIR"
+# Remove a half-written .tmp if a download fails partway (the real file is left untouched).
+TMP=""
+trap 'rm -f "${TMP:-}" "$OUTPUT_DIR/${YESTERDAY}_profile.json.tmp"' EXIT
 
 # ── Helper: fetch JSON from Nightscout ───────────────────────────────────────
 ns_get() {
@@ -74,26 +77,35 @@ ns_get() {
     local url="${NIGHTSCOUT_URL}${path}${AUTH_PARAM:+${sep}${AUTH_PARAM}}"
     local response http_code body
 
-    response=$(curl -gs -w "\n__HTTP_CODE__:%{http_code}" \
-        ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
-        -H "Accept: application/json" \
-        "$url" 2>&1) || { echo "ERROR: curl failed (exit $?): $response" >&2; return 1; }
-
-    http_code="${response##*__HTTP_CODE__:}"
-    body="${response%$'\n'__HTTP_CODE__:*}"
-
-    if [[ "$http_code" != "200" ]]; then
-        echo "ERROR: HTTP $http_code from $url" >&2
-        echo "       Response: $body" >&2
-        return 1
-    fi
-
-    echo "$body"
+    # Up to 3 tries, 60s each: the server sometimes takes ~5s, and at 1am the Mac
+    # may still be waking up with no network yet.
+    local attempt
+    for attempt in 1 2 3; do
+        if response=$(curl -gs --connect-timeout 20 --max-time 60 -w "\n__HTTP_CODE__:%{http_code}" \
+            ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+            -H "Accept: application/json" \
+            "$url" 2>&1); then
+            http_code="${response##*__HTTP_CODE__:}"
+            body="${response%$'\n'__HTTP_CODE__:*}"
+            if [[ "$http_code" == "200" ]]; then
+                echo "$body"
+                return 0
+            fi
+            echo "WARNING: HTTP $http_code (try $attempt/3): $body" >&2
+        else
+            echo "WARNING: curl failed (try $attempt/3)" >&2
+        fi
+        [[ $attempt -lt 3 ]] && sleep $((attempt * 30))
+    done
+    echo "ERROR: giving up on ${path%%\?*} after 3 tries" >&2
+    return 1
 }
+
+SHORT_DAY=0
 
 # ── CGM entries ──────────────────────────────────────────────────────────────
 if [[ "${DOWNLOAD_ENTRIES:-1}" == "1" ]]; then
-    OUT="$OUTPUT_DIR/${YESTERDAY}_entries.csv"
+    OUT="$OUTPUT_DIR/${YESTERDAY}_entries.csv"; TMP="$OUT.tmp"
     echo "Downloading CGM entries for $YESTERDAY..."
 
     ns_get "/api/v1/entries.json?find[date][\$gte]=${DAY_START_MS}&find[date][\$lte]=${DAY_END_MS}&count=1440" \
@@ -107,15 +119,23 @@ if [[ "${DOWNLOAD_ENTRIES:-1}" == "1" ]]; then
             (.device // "")
         ])
         | @csv
-    ' > "$OUT"
+    ' > "$TMP"
+    mv "$TMP" "$OUT"          # only reached if the download + jq succeeded (set -e, pipefail)
 
     COUNT=$(tail -n +2 "$OUT" | wc -l | tr -d ' ')
     echo "  -> $COUNT readings saved to $OUT"
+    # A full day of 5-minute CGM readings is 288. Far fewer means a gap (sensor change,
+    # phone offline, or a bad download) - say so loudly instead of silently succeeding.
+    if (( COUNT < ${MIN_READINGS:-250} )); then
+        echo "WARNING: only $COUNT readings for $YESTERDAY (expected ~288)" >&2
+        osascript -e "display notification \"Only $COUNT CGM readings for $YESTERDAY (expected ~288)\" with title \"Nightscout download\"" 2>/dev/null || true
+        SHORT_DAY=1
+    fi
 fi
 
 # ── Treatments ───────────────────────────────────────────────────────────────
 if [[ "${DOWNLOAD_TREATMENTS:-1}" == "1" ]]; then
-    OUT="$OUTPUT_DIR/${YESTERDAY}_treatments.csv"
+    OUT="$OUTPUT_DIR/${YESTERDAY}_treatments.csv"; TMP="$OUT.tmp"
     echo "Downloading treatments for $YESTERDAY..."
 
     ns_get "/api/v1/treatments.json?find[created_at][\$gte]=${DAY_START_UTC}&find[created_at][\$lte]=${DAY_END_UTC}&count=9999" \
@@ -135,7 +155,8 @@ if [[ "${DOWNLOAD_TREATMENTS:-1}" == "1" ]]; then
             (.enteredBy // "")
         ])
         | @csv
-    ' > "$OUT"
+    ' > "$TMP"
+    mv "$TMP" "$OUT"          # only reached if the download + jq succeeded (set -e, pipefail)
 
     COUNT=$(tail -n +2 "$OUT" | wc -l | tr -d ' ')
     echo "  -> $COUNT treatments saved to $OUT"
@@ -146,7 +167,7 @@ if [[ "${DOWNLOAD_PROFILE:-1}" == "1" ]]; then
     OUT="$OUTPUT_DIR/${YESTERDAY}_profile.json"
     echo "Downloading profile..."
 
-    ns_get "/api/v1/profile.json" > "$OUT"
+    ns_get "/api/v1/profile.json" > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
     echo "  -> Profile saved to $OUT"
 fi
 
@@ -171,4 +192,20 @@ if [[ "${RUN_ANALYSIS:-1}" == "1" ]]; then
     fi
 fi
 
+# ── Catch up on recent gaps ──────────────────────────────────────────────────
+# On the nightly run, re-download any of the previous 7 days whose entries file
+# is missing or empty (e.g. the Mac was asleep or offline at 1am that night).
+if [[ -z "$TARGET_DATE" && "${CATCH_UP_DAYS:-7}" -gt 0 ]]; then
+    for i in $(seq 2 "${CATCH_UP_DAYS:-7}"); do
+        d=$(date -v-${i}d +%Y-%m-%d)
+        f="$OUTPUT_DIR/${d}_entries.csv"
+        n=$([[ -f "$f" ]] && tail -n +2 "$f" | wc -l | tr -d ' ' || echo 0)
+        if (( n == 0 )); then             # missing/empty = failed download; short days are real gaps
+            echo "Catching up $d (no data saved)..."
+            bash "$0" ${NIGHTSCOUT_CONFIG:+-c "$NIGHTSCOUT_CONFIG"} -d "$d" || echo "WARNING: catch-up of $d failed" >&2
+        fi
+    done
+fi
+
 echo "Done. Files are in $OUTPUT_DIR"
+[[ "$SHORT_DAY" == "0" ]] || exit 2      # launchd records a non-zero exit for short days
